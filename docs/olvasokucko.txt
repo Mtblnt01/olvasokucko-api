@@ -1,0 +1,222 @@
+composer create-project laravel/laravel olvasokucko-api
+php artisan install:api
+
+.env
+DB_CONNECTION=mysql
+DB_HOST=127.0.0.1
+DB_PORT=3306
+DB_DATABASE=olvasokucko-api-db
+DB_USERNAME=root
+DB_PASSWORD=
+
+php artisan make:model Book -mfs --api
+php artisan make:model Loan -mfs --api
+
+
+
+
+class Book extends Model
+{
+    /** @use HasFactory<\Database\Factories\BookFactory> */
+    use HasFactory;
+
+    protected $fillable = ['title', 'author', 'available_copies'];
+    public function loans(){
+        return $this->hasMany(Loan::class);
+    }
+}
+
+
+class Loan extends Model
+{
+    /** @use HasFactory<\Database\Factories\LoanFactory> */
+    use HasFactory;
+
+    protected $fillable = ['book_id', 'boorower_name', 'borrowed_at', 'returned_at'];
+    public function book(){
+        return $this->belongsTo(Book::class);
+    }
+}
+
+
+
+//BookController.php
+
+    /*GET /api/books – Listázza az összes könyvet.*/
+
+    public function index()
+    {
+        return response()->json(Book::all(), 200);
+    }
+
+
+
+    /*● GET /api/books/{query} – Listázza a query-nek megfelelő íróval vagy címmel
+rendelkező könyveket!*/
+    /**
+     * Store a newly created resource in storage.
+     */
+    public function search($query)
+    {
+        $books = Book::where('title', 'like', "%$query%")->orWhere('author', 'like', "%$query%")->get();
+        return response()->json($books, 200);
+    }
+
+
+//LoanController.php
+
+    public function index()
+    {
+       return response()->json(Loan::with('book')->get(), 200);
+    }
+
+
+    //'book_id', 'boorower_name', 'borrowed_at', 'returned_at'
+    public function store(Request $request)
+    {
+        $validated = $request->validate([
+            'book_id' => 'required|exists:books,id',
+            'borrower_name' => 'required|string|max:255',
+
+        ]);
+	
+        $book = Book::findOrFail($validated['book_id']);
+        if ($book->available_copies < 1) {
+            return response()->json(['message' => 'nincs elérhető példány'], 400);
+        }
+        $loan = Loan::create($validated);
+        $book->decrement('available_copies');
+        return response()->json($loan, 201);
+    }
+
+    public function update(Request $request, Loan $loan)
+    {
+        //1. id átvétele
+        //2. az id hoz tartozó Loan megkeresése
+        //3. ha nem null a returned_at akkor hiba üzenet dobasa
+        //4. update a mai datummal
+        //5. return
+        $loan = Loan::findOrFail($id);
+        if (($loan -> returned_at) != null) {
+            return response()->json(['message' => 'a kölcsönzött könyv már visszalett adva'], 400);
+        }
+        $loan->update(['returned_at' => now()]);
+        $loan->book->increment('available_copies');
+        return response()->json(['message' => 'A könyv sikeresen visszavéve'], 200);
+    }
+
+api.php
+
+// ● GET /api/books – Listázza az összes könyvet.
+Route::get('/books', [BookController::class, 'index']);
+// ● GET /api/books/{query} – Listázza a query-nek megfelelő íróval vagy címmel rendelkező könyveket!
+Route::get('/books/{query}', [BookController::class, 'search']);
+
+// ● POST /api/loans – Új kölcsönzés rögzítése (csak ha van elérhető példány).
+Route::post('/loans', [LoanController::class, 'store']);
+// ● PUT /api/loans/{id}/return – Kölcsönzés visszavétele (a könyv példányszámát növeli).
+Route::put('/loans/{id}/return', [LoanController::class, 'update']);
+// ● GET /api/loans – Listázza az aktív és lezárt kölcsönzéseket.
+Route::get('/loans', [LoanController::class, 'index']);
+
+
+BookFactory.php
+
+    public function definition(): array
+    {
+        return [
+            'title' => $this->faker->sentence(3),
+            'author' => $this->faker->name(),
+            'available_copies' => $this->faker->randomNumber(1, 5),
+        ];
+    }
+
+
+LoanFactory.php
+
+        return [
+            'book_id' => Book::inRandomOrder()->first()->id ?? Book::factory(),
+            'borrower_name' => $this->faker->name(),
+            'borrowed_at' => now(),
+            'returned_at' => null,           
+        ];
+
+BookSeeder.php
+
+    public function run(): void
+    {
+        Book::create([
+            'title' => 'Egri Csillagok',
+            'author' => 'Gárdonyi Géza',
+            'available_copies' => 5
+        ]);
+        Book::create([
+            'title' => 'Vuk',
+            'author' => 'Fekete István',
+            'available_copies' => 4
+        ]);
+
+        Book::factory()->count(3)->create();
+    }
+	
+LoanSeeder.php
+    public function run(): void
+    {
+        $book = Book::first();
+        if ($book != null && $book->available_copies > 0) {
+            Loan::create([
+                'book_id' => $book->id,
+                'borrower_name' => 'Pum Pál',
+            ]);
+            $book->decrement('available_copies');
+        }
+	Loan::factory()->count(3)->create();
+    }
+
+DatabaseSeeder.php
+    public function run(): void
+    {
+        $this->call([
+            BookSeeder::class,
+            LoanSeeder::class,
+        ]);
+    }
+
+
+php artisan make:test BookTest
+
+A BookTest.php tartalma:
+
+class BookTest extends TestCase
+{
+    use RefreshDatabase;
+    public function test_index_shows_all(): void
+    {
+        //Arrange
+        Book::factory()->count(3)->create();
+        //$this->seed();
+        //Act
+        $response = $this->getJson('api/books');
+        //Assert
+        $response->assertStatus(200);
+        $response->assertJsonCount(3);
+    }
+}
+
+php artisan test --filter=BookTest
+
+postmanba ugyanerre a vegpontra kell egy teszt :) 
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -22,6 +22,6 @@ rendelkező könyveket!*/
     public function search($query)
     {
         $books = Book::where('title', 'like', "%$query%")->orWhere('author', 'like', "%$query%")->get();
-        return response()->json(Book::all(), 200);
+        return response()->json($books, 200);
     }
 }
